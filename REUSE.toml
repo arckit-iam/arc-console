@@ -1,0 +1,9 @@
+version = 1
+SPDX-PackageName = "arc-console"
+SPDX-PackageSupplier = "Dédale Solutions"
+
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Dédale Solutions"
+SPDX-License-Identifier = "EUPL-1.2"

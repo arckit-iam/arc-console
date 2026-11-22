@@ -1,0 +1,15 @@
+{
+  "name": "arc-console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Console web de la plateforme Instant Access Provider (authentification JWT via arc-auth)",
+  "license": "EUPL-1.2",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

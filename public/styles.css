@@ -1,0 +1,114 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Dédale Solutions
+ * SPDX-License-Identifier: EUPL-1.2
+ */
+
+:root {
+  --bg: #f4f6f9;
+  --card: #ffffff;
+  --text: #1c2430;
+  --muted: #5b6676;
+  --primary: #1f5fbf;
+  --danger: #b42318;
+  --border: #d5dbe4;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.6rem 1.5rem;
+  background: #14213d;
+  color: #fff;
+}
+
+header h1 { margin: 0; font-size: 1.1rem; }
+nav { display: flex; gap: 0.25rem; flex: 1; flex-wrap: wrap; }
+.session { display: flex; align-items: center; gap: 0.75rem; font-size: 0.9rem; }
+
+nav button {
+  background: transparent;
+  color: #dbe4f5;
+  border: 0;
+  padding: 0.45rem 0.8rem;
+  border-radius: 4px;
+}
+nav button[aria-current="page"] { background: rgba(255, 255, 255, 0.18); color: #fff; }
+
+main { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; }
+h2 { margin-top: 0; font-size: 1.25rem; }
+h3 { font-size: 1rem; margin: 1.25rem 0 0.5rem; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+#login { max-width: 360px; margin: 4rem auto; }
+
+label { display: block; margin-bottom: 0.7rem; font-size: 0.85rem; color: var(--muted); }
+label.inline { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0 1rem 0 0; }
+
+input, select {
+  display: block;
+  width: 100%;
+  margin-top: 0.2rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+}
+input[type="checkbox"] { display: inline; width: auto; margin: 0; }
+
+button {
+  font: inherit;
+  cursor: pointer;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  background: var(--primary);
+  color: #fff;
+}
+button.secondary { background: transparent; color: inherit; border-color: currentColor; }
+button.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+header button.secondary { color: #fff; }
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 1rem; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 0.75rem; margin-bottom: 1rem; }
+.toolbar label { margin: 0; }
+.actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+
+table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
+td.mono, code { font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; }
+.empty { color: var(--muted); padding: 0.75rem 0; }
+
+.badge {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: #e6edf9;
+  color: var(--primary);
+  font-size: 0.75rem;
+}
+.badge.warn { background: #fdecea; color: var(--danger); }
+
+#message { max-width: 1100px; margin: 1rem auto 0; padding: 0.7rem 1rem; border-radius: 4px; }
+#message.error { background: #fdecea; color: var(--danger); border: 1px solid #f5b5ae; }
+#message.ok { background: #e7f6ec; color: #1a6b3a; border: 1px solid #a5d8b7; }
