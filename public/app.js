@@ -193,6 +193,69 @@ function confirmThen(question, action) {
   };
 }
 
+// --- Temporalité (dates de début / fin, ordres planifiés) ------------------------------------
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** Compte ou profil : l'ordre de création est-il encore à venir ? */
+const startsLater = (entity) => Boolean(entity.startDate) && entity.startDate > today();
+
+/** Un ordre est-il annulable (création à venir ou fin programmée non échue) ? */
+const hasPending = (entity) => startsLater(entity) || (Boolean(entity.endDate) && entity.endDate >= today());
+
+function lifecycleBadge(entity) {
+  if (startsLater(entity)) return h('span', { class: 'badge warn' }, `création le ${entity.startDate}`);
+  if (entity.endDate && entity.endDate < today()) return h('span', { class: 'badge' }, `expiré (fin ${entity.endDate})`);
+  if (entity.endDate) return h('span', { class: 'badge' }, `actif jusqu'au ${entity.endDate}`);
+  return h('span', { class: 'badge ok' }, 'actif');
+}
+
+/** Champs date de début / fin optionnels ; `read()` retourne `{ startDate, endDate }` (null si vide). */
+function datesFields(values = {}) {
+  const start = h('input', { type: 'date', name: 'startDate', value: values.startDate || '' });
+  const end = h('input', { type: 'date', name: 'endDate', value: values.endDate || '' });
+  return {
+    element: h('div', { class: 'form-grid' },
+      h('label', {}, 'Début (vide : immédiat)', start),
+      h('label', {}, 'Fin (vide : sans fin)', end)),
+    read() {
+      if (start.value && end.value && end.value < start.value) {
+        throw new Error('La date de fin doit être postérieure à la date de début.');
+      }
+      return { startDate: start.value || null, endDate: end.value || null };
+    },
+  };
+}
+
+/** Formulaire de modification des dates ; `path` est la route PUT .../dates de l'entité. */
+function datesEditor(service, path, title, entity) {
+  const dates = datesFields(entity);
+  const form = h('form', { class: 'card' },
+    h('h3', {}, title),
+    h('p', { class: 'empty' }, 'Les ordres planifiés sont recalculés : l\'ancienne planification en attente est annulée.'),
+    dates.element,
+    h('div', { class: 'actions' },
+      h('button', { type: 'submit' }, 'Enregistrer'),
+      h('button', { type: 'button', class: 'secondary', onclick: () => form.remove() }, 'Annuler')));
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    run(async () => {
+      await api(service, 'PUT', path, dates.read());
+    }, 'Dates mises à jour.');
+  });
+  main.append(form);
+  form.scrollIntoView();
+}
+
+function pendingButton(service, path, label) {
+  return h('button', {
+    type: 'button',
+    class: 'secondary',
+    onclick: confirmThen(`Annuler l'ordre planifié de ${label} ?`, () =>
+      run(() => api(service, 'POST', `${path}/cancel-pending`), 'Ordre planifié annulé.')),
+  }, 'Annuler l\'ordre en attente');
+}
+
 /** Champs de métadonnées d'un type de compte ; `read()` retourne l'objet typé ou lève une erreur. */
 function metadataForm(type, values = {}) {
   const fields = (type && type.metadata) || [];
@@ -243,6 +306,7 @@ async function productsView() {
           cell: (p) =>
             canWrite()
               ? h('div', { class: 'actions' },
+                  h('button', { type: 'button', class: 'secondary', onclick: () => profilesPanel(p) }, 'Profils'),
                   h('button', { type: 'button', class: 'secondary', onclick: () => profileForm(p) }, 'Ajouter un profil'),
                   h('button', {
                     type: 'button',
@@ -278,6 +342,7 @@ async function productsView() {
 }
 
 function profileForm(product) {
+  const dates = datesFields();
   const select = h('select', { name: 'scope' }, SCOPES.map((s) => h('option', { value: s, selected: s === 'TIER2' }, s)));
   const form = h('form', { class: 'card' },
     h('h3', {}, `Nouveau profil pour ${product.name}`),
@@ -287,6 +352,7 @@ function profileForm(product) {
       h('label', {}, 'Description', h('input', { name: 'description' })),
       h('label', {}, 'Périmètre (niveau d\'administration)', select)),
     h('p', { class: 'empty' }, 'TIER0 : infrastructure d\'identité (annuaire, contrôleurs de domaine) ; TIER1 : serveurs et applications ; TIER2 : postes et utilisateurs standard.'),
+    dates.element,
     h('button', { type: 'submit' }, 'Créer le profil'));
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -295,10 +361,45 @@ function profileForm(product) {
       name: data.get('name').trim(),
       description: data.get('description').trim(),
       scope: data.get('scope'),
-    }), 'Profil créé, job de provisioning publié.');
+      ...dates.read(),
+    }), 'Profil créé, ordre de provisioning publié.');
   });
   main.append(form);
   form.scrollIntoView();
+}
+
+/** Profils d'un produit : période de validité, statut, modification des dates, annulation, suppression. */
+function profilesPanel(product) {
+  const base = (profile) => `/products/${encodeURIComponent(product.name)}/profiles/${encodeURIComponent(profile.name)}`;
+  const panel = h('div', { class: 'card' },
+    h('h3', {}, `Profils de ${product.name}`),
+    table(
+      [
+        { label: 'Profil', cell: (x) => x.name, mono: true },
+        { label: 'Périmètre', cell: (x) => x.scope || '' },
+        { label: 'Début', cell: (x) => x.startDate || '—' },
+        { label: 'Fin', cell: (x) => x.endDate || '—' },
+        { label: 'Statut', cell: (x) => lifecycleBadge(x) },
+        {
+          label: '',
+          cell: (x) =>
+            h('div', { class: 'actions' },
+              h('button', { type: 'button', class: 'secondary', onclick: () => datesEditor('pm', `${base(x)}/dates`, `Dates du profil ${x.name}`, x) }, 'Dates'),
+              hasPending(x) && pendingButton('pm', base(x), `le profil ${x.name}`),
+              h('button', {
+                type: 'button',
+                class: 'danger',
+                onclick: confirmThen(`Supprimer le profil ${x.name} ?`, () =>
+                  run(() => api('pm', 'DELETE', base(x)), 'Profil supprimé.')),
+              }, 'Supprimer')),
+        },
+      ],
+      product.profiles || [],
+      'Aucun profil.',
+    ),
+    h('div', { class: 'actions' }, h('button', { type: 'button', class: 'secondary', onclick: () => panel.remove() }, 'Fermer')));
+  main.append(panel);
+  panel.scrollIntoView();
 }
 
 // --- Vue générique : comptes -----------------------------------------------------------------
@@ -352,6 +453,9 @@ function accountsView(config) {
           cell: (a) => (a[config.link.field] ? a[config.link.field] : h('span', { class: 'badge warn' }, 'non corrélé')),
         },
         { label: 'Origine', cell: (a) => h('span', { class: 'badge' }, a.source) },
+        { label: 'Début', cell: (a) => a.startDate || '—' },
+        { label: 'Fin', cell: (a) => a.endDate || '—' },
+        { label: 'Statut', cell: (a) => lifecycleBadge(a) },
         { label: 'Métadonnées', cell: (a) => JSON.stringify(a.metadata || {}), mono: true },
         {
           label: '',
@@ -361,8 +465,14 @@ function accountsView(config) {
                   h('button', { type: 'button', class: 'secondary', onclick: () => accountEditor(config, a, typeByName.get(a.type)) }, 'Modifier'),
                   h('button', {
                     type: 'button',
+                    class: 'secondary',
+                    onclick: () => datesEditor(config.service, `/accounts/${encodeURIComponent(a.identifier)}/dates`, `Dates de ${a.identifier}`, a),
+                  }, 'Dates'),
+                  hasPending(a) && pendingButton(config.service, `/accounts/${encodeURIComponent(a.identifier)}`, `le compte ${a.identifier}`),
+                  h('button', {
+                    type: 'button',
                     class: 'danger',
-                    onclick: confirmThen(`Supprimer le compte ${a.identifier} ? Un job de déprovisioning sera publié.`, () =>
+                    onclick: confirmThen(`Supprimer le compte ${a.identifier} ? Un ordre de déprovisioning sera publié.`, () =>
                       run(() => api(config.service, 'DELETE', `/accounts/${encodeURIComponent(a.identifier)}`), 'Compte supprimé.')),
                   }, 'Supprimer'))
               : '',
@@ -387,6 +497,7 @@ function accountCreator(config, types) {
     h('option', { value: '' }, 'Déduit de l\'identifiant'),
     types.map((t) => h('option', { value: t.name }, t.name)));
   const metadataHost = h('div');
+  const dates = datesFields();
   let metadata = metadataForm(null);
   typeSelect.addEventListener('change', () => {
     metadata = metadataForm(types.find((t) => t.name === typeSelect.value));
@@ -400,17 +511,18 @@ function accountCreator(config, types) {
       h('label', {}, 'Type', typeSelect),
       h('label', {}, `${config.link.label} (optionnel)`, h('input', { name: 'link' }))),
     metadataHost,
+    dates.element,
     h('button', { type: 'submit' }, 'Créer le compte'));
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const data = new FormData(form);
     run(async () => {
-      const body = { metadata: metadata.read() };
+      const body = { metadata: metadata.read(), ...dates.read() };
       if (data.get('identifier').trim()) body.identifier = data.get('identifier').trim();
       if (data.get('type')) body.type = data.get('type');
       if (data.get('link').trim()) body[config.link.field] = data.get('link').trim();
       await api(config.service, 'POST', '/accounts', body);
-    }, 'Compte créé, job de provisioning publié.');
+    }, 'Compte créé, ordre de provisioning publié.');
   });
   return form;
 }
