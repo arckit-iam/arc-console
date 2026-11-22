@@ -42,13 +42,18 @@ function h(tag, attributes = {}, ...children) {
   return element;
 }
 
+let messageTimer = null;
+
 function show(message, kind = 'error') {
+  clearTimeout(messageTimer);
   messageBox.textContent = message;
   messageBox.className = kind;
   messageBox.hidden = false;
+  if (kind === 'ok') messageTimer = setTimeout(clearMessage, 5000);
 }
 
 function clearMessage() {
+  clearTimeout(messageTimer);
   messageBox.hidden = true;
   messageBox.textContent = '';
 }
@@ -165,15 +170,19 @@ async function run(action, success) {
 // --- Composants ------------------------------------------------------------------------------
 
 function table(columns, rows, empty) {
-  if (rows.length === 0) return h('p', { class: 'empty' }, empty);
+  if (rows.length === 0) return h('p', { class: 'empty box' }, empty);
   return h(
-    'table',
-    {},
-    h('thead', {}, h('tr', {}, columns.map((c) => h('th', {}, c.label)))),
+    'div',
+    { class: 'table-wrap' },
     h(
-      'tbody',
+      'table',
       {},
-      rows.map((row) => h('tr', {}, columns.map((c) => h('td', { class: c.mono ? 'mono' : undefined }, c.cell(row))))),
+      h('thead', {}, h('tr', {}, columns.map((c) => h('th', {}, c.label)))),
+      h(
+        'tbody',
+        {},
+        rows.map((row) => h('tr', {}, columns.map((c) => h('td', { class: c.mono ? 'mono' : undefined }, c.cell(row))))),
+      ),
     ),
   );
 }
@@ -276,7 +285,8 @@ function profileForm(product) {
     h('div', { class: 'form-grid' },
       h('label', {}, 'Nom du groupe', h('input', { name: 'name', required: true })),
       h('label', {}, 'Description', h('input', { name: 'description' })),
-      h('label', {}, 'Périmètre', select)),
+      h('label', {}, 'Périmètre (niveau d\'administration)', select)),
+    h('p', { class: 'empty' }, 'TIER0 : infrastructure d\'identité (annuaire, contrôleurs de domaine) ; TIER1 : serveurs et applications ; TIER2 : postes et utilisateurs standard.'),
     h('button', { type: 'submit' }, 'Créer le profil'));
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -385,7 +395,8 @@ function accountCreator(config, types) {
   const form = h('form', { class: 'card' },
     h('h3', {}, 'Nouveau compte'),
     h('div', { class: 'form-grid' },
-      h('label', {}, 'Identifiant', h('input', { name: 'identifier', required: true })),
+      h('label', {}, config.service === 'im' ? 'Identifiant (généré si vide)' : 'Identifiant',
+        h('input', { name: 'identifier', required: config.service !== 'im' })),
       h('label', {}, 'Type', typeSelect),
       h('label', {}, `${config.link.label} (optionnel)`, h('input', { name: 'link' }))),
     metadataHost,
@@ -394,7 +405,8 @@ function accountCreator(config, types) {
     event.preventDefault();
     const data = new FormData(form);
     run(async () => {
-      const body = { identifier: data.get('identifier').trim(), metadata: metadata.read() };
+      const body = { metadata: metadata.read() };
+      if (data.get('identifier').trim()) body.identifier = data.get('identifier').trim();
       if (data.get('type')) body.type = data.get('type');
       if (data.get('link').trim()) body[config.link.field] = data.get('link').trim();
       await api(config.service, 'POST', '/accounts', body);
@@ -448,6 +460,7 @@ async function identitiesView() {
           cell: (i) =>
             h('div', { class: 'actions' },
               h('button', { type: 'button', class: 'secondary', onclick: () => identityAccounts(i) }, 'Comptes'),
+              h('button', { type: 'button', class: 'secondary', onclick: () => identityContracts(i) }, 'Contrats'),
               canWrite() && h('button', {
                 type: 'button',
                 class: 'danger',
@@ -464,20 +477,22 @@ async function identitiesView() {
     const form = h('form', { class: 'card' },
       h('h3', {}, 'Nouvelle identité'),
       h('div', { class: 'form-grid' },
-        h('label', {}, 'Matricule', h('input', { name: 'employeeId', required: true })),
         h('label', {}, 'Prénom', h('input', { name: 'firstName' })),
         h('label', {}, 'Nom', h('input', { name: 'lastName' })),
         h('label', {}, 'E-mail', h('input', { name: 'email', type: 'email' }))),
+      h('p', { class: 'empty' }, 'Le matricule est généré à la création.'),
       h('button', { type: 'submit' }, 'Créer'));
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const data = new FormData(form);
-      run(() => api('im', 'POST', '/identities', {
-        employeeId: data.get('employeeId').trim(),
-        firstName: data.get('firstName').trim(),
-        lastName: data.get('lastName').trim(),
-        email: data.get('email').trim(),
-      }), 'Identité créée.');
+      run(async () => {
+        const created = await api('im', 'POST', '/identities', {
+          firstName: data.get('firstName').trim(),
+          lastName: data.get('lastName').trim(),
+          email: data.get('email').trim(),
+        });
+        show(`Identité créée : matricule ${created.employeeId}.`, 'ok');
+      });
     });
     nodes.push(form);
   }
@@ -506,23 +521,106 @@ async function identityAccounts(identity) {
   }
 }
 
+/** Contrats d'une identité : liste, création et suppression ; les métadonnées dépendent du type de contrat. */
+async function identityContracts(identity) {
+  clearMessage();
+  try {
+    const id = encodeURIComponent(identity.employeeId);
+    const [types, contracts] = await Promise.all([
+      api('im', 'GET', '/contract-types'),
+      api('im', 'GET', `/identities/${id}/contracts`),
+    ]);
+    const panel = h('div', { class: 'card' },
+      h('h3', {}, `Contrats de ${identity.employeeId}`),
+      table(
+        [
+          { label: 'Type', cell: (c) => c.type },
+          { label: 'Début', cell: (c) => c.startDate || '' },
+          { label: 'Fin', cell: (c) => c.endDate || '' },
+          { label: 'Métadonnées', cell: (c) => JSON.stringify(c.metadata || {}), mono: true },
+          {
+            label: '',
+            cell: (c) =>
+              canWrite()
+                ? h('button', {
+                    type: 'button',
+                    class: 'danger',
+                    onclick: confirmThen(`Supprimer ce contrat ${c.type} ?`, () =>
+                      run(() => api('im', 'DELETE', `/identities/${id}/contracts/${c.id}`), 'Contrat supprimé.')),
+                  }, 'Supprimer')
+                : '',
+          },
+        ],
+        contracts,
+        'Aucun contrat pour cette identité.',
+      ));
+    if (canWrite() && types.length > 0) panel.append(contractCreator(identity, types));
+    main.append(panel);
+    panel.scrollIntoView();
+  } catch (error) {
+    if (session) show(error.message);
+  }
+}
+
+function contractCreator(identity, types) {
+  const typeSelect = h('select', { name: 'type', required: true }, types.map((t) => h('option', { value: t.name }, t.name)));
+  const metadataHost = h('div');
+  let metadata = metadataForm(types[0]);
+  metadataHost.replaceChildren(metadata.element);
+  typeSelect.addEventListener('change', () => {
+    metadata = metadataForm(types.find((t) => t.name === typeSelect.value));
+    metadataHost.replaceChildren(metadata.element);
+  });
+  const form = h('form', {},
+    h('h4', {}, 'Nouveau contrat'),
+    h('div', { class: 'form-grid' },
+      h('label', {}, 'Type', typeSelect),
+      h('label', {}, 'Début', h('input', { name: 'startDate', type: 'date' })),
+      h('label', {}, 'Fin', h('input', { name: 'endDate', type: 'date' }))),
+    metadataHost,
+    h('button', { type: 'submit' }, 'Ajouter le contrat'));
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    run(() => api('im', 'POST', `/identities/${encodeURIComponent(identity.employeeId)}/contracts`, {
+      type: data.get('type'),
+      startDate: data.get('startDate') || null,
+      endDate: data.get('endDate') || null,
+      metadata: metadata.read(),
+    }), 'Contrat ajouté.');
+  });
+  return form;
+}
+
 // --- Vue : types de compte -------------------------------------------------------------------
 
 async function typesView() {
-  const [pm, im] = await Promise.all([api('pm', 'GET', '/account-types'), api('im', 'GET', '/account-types')]);
+  const [pm, im, contractTypes] = await Promise.all([
+    api('pm', 'GET', '/account-types'),
+    api('im', 'GET', '/account-types'),
+    api('im', 'GET', '/contract-types'),
+  ]);
+  const fields = (t) => (t.metadata || []).map((m) => `${m.name}:${m.type}${m.required ? '*' : ''}`).join(', ') || '—';
   const columns = [
     { label: 'Nom', cell: (t) => t.name },
-    { label: 'Nature', cell: (t) => h('span', { class: 'badge' }, t.kind) },
+    { label: 'Nature', cell: (t) => h('span', { class: `badge ${String(t.kind).toLowerCase()}` }, t.kind) },
     { label: 'Expression régulière', cell: (t) => t.pattern, mono: true },
-    { label: 'Métadonnées', cell: (t) => (t.metadata || []).map((m) => `${m.name}:${m.type}${m.required ? '*' : ''}`).join(', ') || '—' },
+    { label: 'Métadonnées', cell: fields },
+  ];
+  const userColumns = [
+    ...columns,
+    { label: 'Matricule déduit', cell: (t) => t.identityTemplate || '—', mono: true },
+    { label: 'Identifiant généré', cell: (t) => t.identifierTemplate || '—', mono: true },
   ];
   render(
-    h('h2', {}, 'Types de compte'),
+    h('h2', {}, 'Types'),
     h('p', { class: 'empty' }, 'Définis par la configuration du déploiement ; l\'expression régulière relie un compte à son produit ou à son identité.'),
     h('h3', {}, 'Comptes de service (product-manager)'),
     table(columns, pm, 'Aucun type configuré.'),
     h('h3', {}, 'Comptes utilisateurs (identity-manager)'),
-    table(columns, im, 'Aucun type configuré.'),
+    table(userColumns, im, 'Aucun type configuré.'),
+    h('h3', {}, 'Contrats (identity-manager)'),
+    table([{ label: 'Nom', cell: (t) => t.name }, { label: 'Métadonnées', cell: fields }], contractTypes, 'Aucun type de contrat configuré.'),
   );
 }
 
@@ -533,7 +631,7 @@ const VIEWS = [
   { id: 'service-accounts', label: 'Comptes de service', render: accountsView(serviceAccounts) },
   { id: 'identities', label: 'Identités', render: identitiesView },
   { id: 'user-accounts', label: 'Comptes utilisateurs', render: accountsView(userAccounts) },
-  { id: 'types', label: 'Types de compte', render: typesView },
+  { id: 'types', label: 'Types', render: typesView },
 ];
 
 async function navigate(id) {
@@ -559,7 +657,9 @@ async function navigate(id) {
 
 function showApp() {
   topbar.hidden = false;
-  document.getElementById('whoami').textContent = `${session.user} (${session.roles.join(', ') || 'aucun rôle'})`;
+  document.getElementById('whoami').textContent = session.user;
+  document.getElementById('roles').textContent = session.roles.join(', ') || 'aucun rôle';
+  document.getElementById('avatar').textContent = String(session.user).charAt(0);
   nav.replaceChildren(...VIEWS.map((v) => h('button', { type: 'button', 'data-view': v.id, onclick: () => navigate(v.id) }, v.label)));
   navigate(window.location.hash.slice(1));
 }
@@ -567,7 +667,9 @@ function showApp() {
 function showLogin() {
   topbar.hidden = true;
   const form = h('form', { id: 'login', class: 'card', autocomplete: 'on' },
-    h('h2', {}, 'Connexion'),
+    h('div', { class: 'login-brand' },
+      h('span', { class: 'logo', 'aria-hidden': 'true' }, 'A'),
+      h('div', {}, h('h2', {}, 'ARC Console'), h('p', {}, 'Connectez-vous pour continuer'))),
     h('label', {}, 'Identifiant', h('input', { name: 'username', type: 'text', autocomplete: 'username', required: true })),
     h('label', {}, 'Mot de passe', h('input', { name: 'password', type: 'password', autocomplete: 'current-password', required: true })),
     h('button', { type: 'submit' }, 'Se connecter'));
