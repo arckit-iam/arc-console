@@ -62,6 +62,14 @@ function render(...nodes) {
   main.replaceChildren(...nodes);
 }
 
+/** Affiche un panneau en bas de page ; un seul panneau à la fois (le précédent est remplacé). */
+function openPanel(panel) {
+  for (const previous of main.querySelectorAll('[data-panel]')) previous.remove();
+  panel.setAttribute('data-panel', '');
+  main.append(panel);
+  panel.scrollIntoView();
+}
+
 // --- Session et appels API -------------------------------------------------------------------
 
 function decodeJwt(token) {
@@ -86,6 +94,14 @@ function loadSession() {
 
 function canWrite() {
   return session.roles.some((role) => WRITE_ROLES.includes(role));
+}
+
+/** Niveau d'accès lisible : les groupes et rôles techniques ne sont jamais affichés. */
+function accessLabel() {
+  if (session.roles.includes('ARC_ADMIN')) return 'Administrateur';
+  if (session.roles.includes('ARC_PUBLISHER')) return 'Gestionnaire';
+  if (session.roles.includes('ARC_READER')) return 'Lecture seule';
+  return 'Accès limité';
 }
 
 async function login(username, password) {
@@ -155,8 +171,13 @@ async function api(service, method, path, body) {
   return data;
 }
 
-/** Exécute une action, affiche son résultat et rafraîchit la vue. */
+let busy = false;
+
+/** Exécute une action, affiche son résultat et rafraîchit la vue (une seule action à la fois). */
 async function run(action, success) {
+  if (busy) return;
+  busy = true;
+  document.body.classList.add('busy');
   clearMessage();
   try {
     await action();
@@ -164,6 +185,9 @@ async function run(action, success) {
     await currentView();
   } catch (error) {
     if (session) show(error.message);
+  } finally {
+    busy = false;
+    document.body.classList.remove('busy');
   }
 }
 
@@ -191,6 +215,20 @@ function confirmThen(question, action) {
   return () => {
     if (window.confirm(question)) action();
   };
+}
+
+/** Bloc repliable (formulaire de création) : fermé par défaut pour alléger la page. */
+function collapsible(title, content, card = true) {
+  return h('details', { class: card ? 'fold card' : 'fold' }, h('summary', {}, title), content);
+}
+
+/** Métadonnées sous forme de pastilles ; les attributs d'habilitation (groupes, rôles...) sont masqués. */
+const TECHNICAL_KEYS = /^(groups?|member(s|of)?|roles?|entitlements?|rights?|permissions?)$/i;
+
+function metadataCell(metadata) {
+  const entries = Object.entries(metadata || {}).filter(([key]) => !TECHNICAL_KEYS.test(key));
+  if (entries.length === 0) return '\u2014';
+  return h('div', { class: 'chips' }, entries.map(([key, value]) => h('span', { class: 'chip' }, `${key} : ${value}`)));
 }
 
 // --- Temporalité (dates de début / fin, ordres planifiés) ------------------------------------
@@ -243,8 +281,7 @@ function datesEditor(service, path, title, entity) {
       await api(service, 'PUT', path, dates.read());
     }, 'Dates mises à jour.');
   });
-  main.append(form);
-  form.scrollIntoView();
+  openPanel(form);
 }
 
 function pendingButton(service, path, label) {
@@ -322,8 +359,7 @@ async function productsView() {
     ),
   ];
   if (canWrite()) {
-    const form = h('form', { class: 'card' },
-      h('h3', {}, 'Nouveau produit'),
+    const form = h('form', {},
       h('div', { class: 'form-grid' },
         h('label', {}, 'Nom', h('input', { name: 'name', required: true })),
         h('label', {}, 'Description', h('input', { name: 'description' }))),
@@ -336,7 +372,7 @@ async function productsView() {
         description: data.get('description').trim(),
       }), 'Produit créé.');
     });
-    nodes.push(form);
+    nodes.push(collapsible('Nouveau produit', form));
   }
   render(...nodes);
 }
@@ -346,9 +382,9 @@ function profileForm(product) {
   const select = h('select', { name: 'scope' }, SCOPES.map((s) => h('option', { value: s, selected: s === 'TIER2' }, s)));
   const form = h('form', { class: 'card' },
     h('h3', {}, `Nouveau profil pour ${product.name}`),
-    h('p', { class: 'empty' }, 'La création du profil provisionne le groupe correspondant dans l\'annuaire.'),
+    h('p', { class: 'empty' }, 'La création du profil provisionne le droit correspondant dans l\'annuaire.'),
     h('div', { class: 'form-grid' },
-      h('label', {}, 'Nom du groupe', h('input', { name: 'name', required: true })),
+      h('label', {}, 'Nom du profil', h('input', { name: 'name', required: true })),
       h('label', {}, 'Description', h('input', { name: 'description' })),
       h('label', {}, 'Périmètre (niveau d\'administration)', select)),
     h('p', { class: 'empty' }, 'TIER0 : infrastructure d\'identité (annuaire, contrôleurs de domaine) ; TIER1 : serveurs et applications ; TIER2 : postes et utilisateurs standard.'),
@@ -364,8 +400,7 @@ function profileForm(product) {
       ...dates.read(),
     }), 'Profil créé, ordre de provisioning publié.');
   });
-  main.append(form);
-  form.scrollIntoView();
+  openPanel(form);
 }
 
 /** Profils d'un produit : période de validité, statut, modification des dates, annulation, suppression. */
@@ -398,8 +433,7 @@ function profilesPanel(product) {
       'Aucun profil.',
     ),
     h('div', { class: 'actions' }, h('button', { type: 'button', class: 'secondary', onclick: () => panel.remove() }, 'Fermer')));
-  main.append(panel);
-  panel.scrollIntoView();
+  openPanel(panel);
 }
 
 // --- Vue générique : comptes -----------------------------------------------------------------
@@ -444,43 +478,7 @@ function accountsView(config) {
     });
 
     const typeByName = new Map(types.map((t) => [t.name, t]));
-    const list = table(
-      [
-        { label: 'Compte', cell: (a) => a.identifier, mono: true },
-        { label: 'Type', cell: (a) => a.type },
-        {
-          label: config.link.label,
-          cell: (a) => (a[config.link.field] ? a[config.link.field] : h('span', { class: 'badge warn' }, 'non corrélé')),
-        },
-        { label: 'Origine', cell: (a) => h('span', { class: 'badge' }, a.source) },
-        { label: 'Début', cell: (a) => a.startDate || '—' },
-        { label: 'Fin', cell: (a) => a.endDate || '—' },
-        { label: 'Statut', cell: (a) => lifecycleBadge(a) },
-        { label: 'Métadonnées', cell: (a) => JSON.stringify(a.metadata || {}), mono: true },
-        {
-          label: '',
-          cell: (a) =>
-            canWrite()
-              ? h('div', { class: 'actions' },
-                  h('button', { type: 'button', class: 'secondary', onclick: () => accountEditor(config, a, typeByName.get(a.type)) }, 'Modifier'),
-                  h('button', {
-                    type: 'button',
-                    class: 'secondary',
-                    onclick: () => datesEditor(config.service, `/accounts/${encodeURIComponent(a.identifier)}/dates`, `Dates de ${a.identifier}`, a),
-                  }, 'Dates'),
-                  hasPending(a) && pendingButton(config.service, `/accounts/${encodeURIComponent(a.identifier)}`, `le compte ${a.identifier}`),
-                  h('button', {
-                    type: 'button',
-                    class: 'danger',
-                    onclick: confirmThen(`Supprimer le compte ${a.identifier} ? Un ordre de déprovisioning sera publié.`, () =>
-                      run(() => api(config.service, 'DELETE', `/accounts/${encodeURIComponent(a.identifier)}`), 'Compte supprimé.')),
-                  }, 'Supprimer'))
-              : '',
-        },
-      ],
-      accounts,
-      'Aucun compte.',
-    );
+    const list = table(accountColumns(config, typeByName), accounts, 'Aucun compte.');
 
     const nodes = [h('h2', {}, config.title), filterForm, list];
     if (canWrite()) nodes.push(accountCreator(config, types));
@@ -492,24 +490,73 @@ accountsView.filters = {
   im: { link: '', type: '', uncorrelated: false },
 };
 
-function accountCreator(config, types) {
-  const typeSelect = h('select', { name: 'type' },
-    h('option', { value: '' }, 'Déduit de l\'identifiant'),
+/**
+ * Colonnes d'une liste de comptes. `showLink` affiche la colonne de corrélation (produit ou identité) ;
+ * pour les comptes utilisateurs, l'identité ouvre sa fiche.
+ */
+function accountColumns(config, typeByName, showLink = true) {
+  const path = (a) => `/accounts/${encodeURIComponent(a.identifier)}`;
+  return [
+    { label: 'Compte', cell: (a) => a.identifier, mono: true },
+    { label: 'Type', cell: (a) => a.type },
+    showLink && {
+      label: config.link.label,
+      cell: (a) => {
+        const target = a[config.link.field];
+        if (!target) return h('span', { class: 'badge warn' }, 'non corrélé');
+        return config.service === 'im' ? identityLink(target) : target;
+      },
+    },
+    { label: 'Origine', cell: (a) => h('span', { class: 'badge' }, a.source) },
+    { label: 'Début', cell: (a) => a.startDate || '—' },
+    { label: 'Fin', cell: (a) => a.endDate || '—' },
+    { label: 'Statut', cell: (a) => lifecycleBadge(a) },
+    { label: 'Détails', cell: (a) => metadataCell(a.metadata) },
+    {
+      label: '',
+      cell: (a) =>
+        canWrite()
+          ? h('div', { class: 'actions' },
+              h('button', { type: 'button', class: 'secondary', onclick: () => accountEditor(config, a, typeByName.get(a.type)) }, 'Modifier'),
+              h('button', {
+                type: 'button',
+                class: 'secondary',
+                onclick: () => datesEditor(config.service, `${path(a)}/dates`, `Dates de ${a.identifier}`, a),
+              }, 'Dates'),
+              hasPending(a) && pendingButton(config.service, path(a), `le compte ${a.identifier}`),
+              h('button', {
+                type: 'button',
+                class: 'danger',
+                onclick: confirmThen(`Supprimer le compte ${a.identifier} ? Un ordre de déprovisioning sera publié.`, () =>
+                  run(() => api(config.service, 'DELETE', path(a)), 'Compte supprimé.')),
+              }, 'Supprimer'))
+          : '',
+    },
+  ].filter(Boolean);
+}
+
+/**
+ * Formulaire de création d'un compte. Avec `fixedLink` (fiche d'une identité), le compte est rattaché
+ * d'office à cette identité et son type est obligatoire.
+ */
+function accountCreator(config, types, fixedLink) {
+  const typeSelect = h('select', { name: 'type', required: Boolean(fixedLink) },
+    !fixedLink && h('option', { value: '' }, 'Déduit de l\'identifiant'),
     types.map((t) => h('option', { value: t.name }, t.name)));
   const metadataHost = h('div');
   const dates = datesFields();
-  let metadata = metadataForm(null);
+  let metadata = metadataForm(fixedLink ? types[0] : null);
+  metadataHost.replaceChildren(metadata.element);
   typeSelect.addEventListener('change', () => {
     metadata = metadataForm(types.find((t) => t.name === typeSelect.value));
     metadataHost.replaceChildren(metadata.element);
   });
-  const form = h('form', { class: 'card' },
-    h('h3', {}, 'Nouveau compte'),
+  const form = h('form', {},
     h('div', { class: 'form-grid' },
       h('label', {}, config.service === 'im' ? 'Identifiant (généré si vide)' : 'Identifiant',
         h('input', { name: 'identifier', required: config.service !== 'im' })),
       h('label', {}, 'Type', typeSelect),
-      h('label', {}, `${config.link.label} (optionnel)`, h('input', { name: 'link' }))),
+      !fixedLink && h('label', {}, `${config.link.label} (optionnel)`, h('input', { name: 'link' }))),
     metadataHost,
     dates.element,
     h('button', { type: 'submit' }, 'Créer le compte'));
@@ -520,11 +567,12 @@ function accountCreator(config, types) {
       const body = { metadata: metadata.read(), ...dates.read() };
       if (data.get('identifier').trim()) body.identifier = data.get('identifier').trim();
       if (data.get('type')) body.type = data.get('type');
-      if (data.get('link').trim()) body[config.link.field] = data.get('link').trim();
+      if (fixedLink) body[config.link.field] = fixedLink;
+      else if (data.get('link').trim()) body[config.link.field] = data.get('link').trim();
       await api(config.service, 'POST', '/accounts', body);
     }, 'Compte créé, ordre de provisioning publié.');
   });
-  return form;
+  return collapsible('Nouveau compte', form, !fixedLink);
 }
 
 function accountEditor(config, account, type) {
@@ -548,8 +596,7 @@ function accountEditor(config, account, type) {
       }
     }, 'Compte mis à jour.');
   });
-  main.append(form);
-  form.scrollIntoView();
+  openPanel(form);
 }
 
 const serviceAccounts = { service: 'pm', title: 'Comptes de service', link: { field: 'product', label: 'Produit' } };
@@ -558,36 +605,44 @@ const userAccounts = { service: 'im', title: 'Comptes utilisateurs', link: { fie
 // --- Vue : identités -------------------------------------------------------------------------
 
 async function identitiesView() {
-  const identities = await api('im', 'GET', '/identities');
+  const identities = (await api('im', 'GET', '/identities'))
+    .sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`));
+  const columns = [
+    { label: 'Matricule', cell: (i) => identityLink(i.employeeId), mono: true },
+    { label: 'Prénom', cell: (i) => i.firstName || '' },
+    { label: 'Nom', cell: (i) => i.lastName || '' },
+    { label: 'E-mail', cell: (i) => i.email || '' },
+    {
+      label: '',
+      cell: (i) =>
+        h('div', { class: 'actions' },
+          h('button', { type: 'button', class: 'secondary', onclick: () => openIdentity(i.employeeId) }, 'Détail'),
+          canWrite() && h('button', {
+            type: 'button',
+            class: 'danger',
+            onclick: confirmThen(`Supprimer l'identité ${i.employeeId} ? Ses comptes deviendront non corrélés.`, () =>
+              run(() => api('im', 'DELETE', `/identities/${encodeURIComponent(i.employeeId)}`), 'Identité supprimée.')),
+          }, 'Supprimer')),
+    },
+  ];
+  const holder = h('div');
+  const search = h('input', { type: 'search', placeholder: 'Rechercher par matricule, nom ou e-mail', 'aria-label': 'Rechercher une identité' });
+  const draw = () => {
+    const query = search.value.trim().toLowerCase();
+    const rows = query
+      ? identities.filter((i) => [i.employeeId, i.firstName, i.lastName, i.email].some((v) => (v || '').toLowerCase().includes(query)))
+      : identities;
+    holder.replaceChildren(table(columns, rows, query ? 'Aucune identité ne correspond.' : 'Aucune identité.'));
+  };
+  search.addEventListener('input', draw);
+  draw();
   const nodes = [
     h('h2', {}, 'Identités'),
-    table(
-      [
-        { label: 'Matricule', cell: (i) => i.employeeId, mono: true },
-        { label: 'Prénom', cell: (i) => i.firstName || '' },
-        { label: 'Nom', cell: (i) => i.lastName || '' },
-        { label: 'E-mail', cell: (i) => i.email || '' },
-        {
-          label: '',
-          cell: (i) =>
-            h('div', { class: 'actions' },
-              h('button', { type: 'button', class: 'secondary', onclick: () => identityAccounts(i) }, 'Comptes'),
-              h('button', { type: 'button', class: 'secondary', onclick: () => identityContracts(i) }, 'Contrats'),
-              canWrite() && h('button', {
-                type: 'button',
-                class: 'danger',
-                onclick: confirmThen(`Supprimer l'identité ${i.employeeId} ? Ses comptes deviendront non corrélés.`, () =>
-                  run(() => api('im', 'DELETE', `/identities/${encodeURIComponent(i.employeeId)}`), 'Identité supprimée.')),
-              }, 'Supprimer')),
-        },
-      ],
-      identities,
-      'Aucune identité.',
-    ),
+    h('div', { class: 'toolbar' }, h('label', {}, 'Rechercher', search)),
+    holder,
   ];
   if (canWrite()) {
-    const form = h('form', { class: 'card' },
-      h('h3', {}, 'Nouvelle identité'),
+    const form = h('form', {},
       h('div', { class: 'form-grid' },
         h('label', {}, 'Prénom', h('input', { name: 'firstName' })),
         h('label', {}, 'Nom', h('input', { name: 'lastName' })),
@@ -603,75 +658,94 @@ async function identitiesView() {
           lastName: data.get('lastName').trim(),
           email: data.get('email').trim(),
         });
-        show(`Identité créée : matricule ${created.employeeId}.`, 'ok');
+        goToIdentity(created.employeeId);
+        show(`Identité créée : matricule ${created.employeeId}. Ajoutez-lui des comptes ci-dessous.`, 'ok');
       });
     });
-    nodes.push(form);
+    nodes.push(collapsible('Nouvelle identité', form));
   }
   render(...nodes);
 }
 
-async function identityAccounts(identity) {
-  clearMessage();
-  try {
-    const accounts = await api('im', 'GET', `/identities/${encodeURIComponent(identity.employeeId)}/accounts`);
-    const panel = h('div', { class: 'card' },
-      h('h3', {}, `Comptes de ${identity.employeeId}`),
-      table(
-        [
-          { label: 'Compte', cell: (a) => a.identifier, mono: true },
-          { label: 'Type', cell: (a) => a.type },
-          { label: 'Origine', cell: (a) => a.source },
-        ],
-        accounts,
-        'Aucun compte corrélé à cette identité.',
-      ));
-    main.append(panel);
-    panel.scrollIntoView();
-  } catch (error) {
-    if (session) show(error.message);
-  }
+/** Lien vers la fiche d'une identité. */
+function identityLink(employeeId) {
+  return h('button', { type: 'button', class: 'link', onclick: () => openIdentity(employeeId) }, employeeId);
 }
 
-/** Contrats d'une identité : liste, création et suppression ; les métadonnées dépendent du type de contrat. */
-async function identityContracts(identity) {
+/** La vue courante devient la fiche de l'identité (les actions la rafraîchissent). */
+function goToIdentity(employeeId) {
+  currentView = async () => {
+    try {
+      await identityDetail(employeeId);
+    } catch (error) {
+      if (session) {
+        render();
+        show(error.message);
+      }
+    }
+  };
+  setActiveNav('identities');
+}
+
+/** Ouvre la fiche d'une identité. */
+function openIdentity(employeeId) {
+  goToIdentity(employeeId);
   clearMessage();
-  try {
-    const id = encodeURIComponent(identity.employeeId);
-    const [types, contracts] = await Promise.all([
-      api('im', 'GET', '/contract-types'),
-      api('im', 'GET', `/identities/${id}/contracts`),
-    ]);
-    const panel = h('div', { class: 'card' },
-      h('h3', {}, `Contrats de ${identity.employeeId}`),
-      table(
-        [
-          { label: 'Type', cell: (c) => c.type },
-          { label: 'Début', cell: (c) => c.startDate || '' },
-          { label: 'Fin', cell: (c) => c.endDate || '' },
-          { label: 'Métadonnées', cell: (c) => JSON.stringify(c.metadata || {}), mono: true },
-          {
-            label: '',
-            cell: (c) =>
-              canWrite()
-                ? h('button', {
-                    type: 'button',
-                    class: 'danger',
-                    onclick: confirmThen(`Supprimer ce contrat ${c.type} ?`, () =>
-                      run(() => api('im', 'DELETE', `/identities/${id}/contracts/${c.id}`), 'Contrat supprimé.')),
-                  }, 'Supprimer')
-                : '',
-          },
-        ],
-        contracts,
-        'Aucun contrat pour cette identité.',
-      ));
-    if (canWrite() && types.length > 0) panel.append(contractCreator(identity, types));
-    main.append(panel);
-    panel.scrollIntoView();
-  } catch (error) {
-    if (session) show(error.message);
-  }
+  render(loading());
+  return currentView();
+}
+
+/** Fiche d'une identité : informations, comptes (avec leurs actions) et contrats. */
+async function identityDetail(employeeId) {
+  const id = encodeURIComponent(employeeId);
+  const [identity, accountTypes, accounts, contractTypes, contracts] = await Promise.all([
+    api('im', 'GET', `/identities/${id}`),
+    api('im', 'GET', '/account-types'),
+    api('im', 'GET', `/identities/${id}/accounts`),
+    api('im', 'GET', '/contract-types'),
+    api('im', 'GET', `/identities/${id}/contracts`),
+  ]);
+  const typeByName = new Map(accountTypes.map((t) => [t.name, t]));
+  const name = [identity.firstName, identity.lastName].filter(Boolean).join(' ');
+
+  const accountsCard = h('div', { class: 'card' },
+    h('h3', {}, `Comptes (${accounts.length})`),
+    table(accountColumns(userAccounts, typeByName, false), accounts, 'Aucun compte pour cette identité.'));
+  if (canWrite() && accountTypes.length > 0) accountsCard.append(accountCreator(userAccounts, accountTypes, identity.employeeId));
+
+  const contractsCard = h('div', { class: 'card' },
+    h('h3', {}, `Contrats (${contracts.length})`),
+    table(
+      [
+        { label: 'Type', cell: (c) => c.type },
+        { label: 'Début', cell: (c) => c.startDate || '' },
+        { label: 'Fin', cell: (c) => c.endDate || '' },
+        { label: 'Détails', cell: (c) => metadataCell(c.metadata) },
+        {
+          label: '',
+          cell: (c) =>
+            canWrite()
+              ? h('button', {
+                  type: 'button',
+                  class: 'danger',
+                  onclick: confirmThen(`Supprimer ce contrat ${c.type} ?`, () =>
+                    run(() => api('im', 'DELETE', `/identities/${id}/contracts/${c.id}`), 'Contrat supprimé.')),
+                }, 'Supprimer')
+              : '',
+        },
+      ],
+      contracts,
+      'Aucun contrat pour cette identité.',
+    ));
+  if (canWrite() && contractTypes.length > 0) contractsCard.append(contractCreator(identity, contractTypes));
+
+  render(
+    h('div', { class: 'actions' }, h('button', { type: 'button', class: 'secondary', onclick: () => navigate('identities') }, '\u2190 Identités')),
+    h('h2', {}, `Identité ${identity.employeeId}`),
+    h('p', { class: 'empty' }, [name, identity.email].filter(Boolean).join(' \u00b7 ') || 'Sans nom ni e-mail.'),
+    accountsCard,
+    contractsCard,
+  );
 }
 
 function contractCreator(identity, types) {
@@ -684,7 +758,6 @@ function contractCreator(identity, types) {
     metadataHost.replaceChildren(metadata.element);
   });
   const form = h('form', {},
-    h('h4', {}, 'Nouveau contrat'),
     h('div', { class: 'form-grid' },
       h('label', {}, 'Type', typeSelect),
       h('label', {}, 'Début', h('input', { name: 'startDate', type: 'date' })),
@@ -701,7 +774,7 @@ function contractCreator(identity, types) {
       metadata: metadata.read(),
     }), 'Contrat ajouté.');
   });
-  return form;
+  return collapsible('Nouveau contrat', form, false);
 }
 
 // --- Vue : types de compte -------------------------------------------------------------------
@@ -746,6 +819,19 @@ const VIEWS = [
   { id: 'types', label: 'Types', render: typesView },
 ];
 
+function loading() {
+  return h('p', { class: 'empty' }, 'Chargement\u2026');
+}
+
+/** Met en évidence l'entrée de menu `id` et l'inscrit dans l'adresse. */
+function setActiveNav(id) {
+  for (const button of nav.children) {
+    if (button.dataset.view === id) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+  if (window.location.hash !== `#${id}`) history.replaceState(null, '', `#${id}`);
+}
+
 async function navigate(id) {
   const view = VIEWS.find((v) => v.id === id) || VIEWS[0];
   currentView = async () => {
@@ -758,19 +844,16 @@ async function navigate(id) {
       }
     }
   };
-  for (const button of nav.children) {
-    if (button.dataset.view === view.id) button.setAttribute('aria-current', 'page');
-    else button.removeAttribute('aria-current');
-  }
-  if (window.location.hash !== `#${view.id}`) history.replaceState(null, '', `#${view.id}`);
+  setActiveNav(view.id);
   clearMessage();
+  render(loading());
   await currentView();
 }
 
 function showApp() {
   topbar.hidden = false;
   document.getElementById('whoami').textContent = session.user;
-  document.getElementById('roles').textContent = session.roles.join(', ') || 'aucun rôle';
+  document.getElementById('roles').textContent = accessLabel();
   document.getElementById('avatar').textContent = String(session.user).charAt(0);
   nav.replaceChildren(...VIEWS.map((v) => h('button', { type: 'button', 'data-view': v.id, onclick: () => navigate(v.id) }, v.label)));
   navigate(window.location.hash.slice(1));

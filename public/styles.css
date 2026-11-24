@@ -237,6 +237,8 @@ button.secondary { background: var(--surface); color: var(--text); border-color:
 button.secondary:hover { background: var(--surface-2); border-color: var(--muted); }
 button.danger { background: transparent; color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 button.danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+button.link { padding: 0; background: transparent; border: 0; color: var(--primary); font: inherit; text-decoration: underline; }
+button.link:hover { background: transparent; color: var(--primary-hover); }
 button.ghost { padding: 0.3rem 0.6rem; font-size: 0.78rem; background: transparent; color: var(--sidebar-text); border-color: rgba(255, 255, 255, 0.2); }
 button.ghost:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -260,7 +262,35 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .actions button, td button { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
 .toolbar button, form.card > button, .actions button[type="submit"] { padding: 0.5rem 1rem; font-size: 0.9rem; }
 
+/* --- Blocs repliables (formulaires de création) ------------------------------------------ */
+
+details.fold { margin: 1.25rem 0; }
+details.fold:not(.card) { margin: 1rem 0 0; padding-top: 1rem; border-top: 1px solid var(--border); }
+details.fold > summary {
+  cursor: pointer;
+  font-weight: 650;
+  color: var(--primary);
+  list-style: none;
+}
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::before { content: "+"; display: inline-block; width: 1.1rem; font-weight: 700; }
+details.fold[open] > summary::before { content: "\2212"; }
+details.fold[open] > summary { margin-bottom: 1rem; }
+
+body.busy { cursor: progress; }
+body.busy main { opacity: 0.6; pointer-events: none; }
+
 /* --- Pastilles --------------------------------------------------------------------------- */
+
+.chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.chip {
+  padding: 0.1rem 0.5rem;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
 
 .badge {
   display: inline-block;
