@@ -599,7 +599,7 @@ function accountEditor(config, account, type) {
   openPanel(form);
 }
 
-const serviceAccounts = { service: 'pm', title: 'Comptes de service', link: { field: 'product', label: 'Produit' } };
+const serviceAccounts = { service: 'pm', title: 'Comptes applicatifs', link: { field: 'product', label: 'Produit' } };
 const userAccounts = { service: 'im', title: 'Comptes utilisateurs', link: { field: 'identity', label: 'Identité (matricule)' } };
 
 // --- Vue : identités -------------------------------------------------------------------------
@@ -800,7 +800,7 @@ async function typesView() {
   render(
     h('h2', {}, 'Types'),
     h('p', { class: 'empty' }, 'Définis par la configuration du déploiement ; l\'expression régulière relie un compte à son produit ou à son identité.'),
-    h('h3', {}, 'Comptes de service (product-manager)'),
+    h('h3', {}, 'Comptes applicatifs (product-manager)'),
     table(columns, pm, 'Aucun type configuré.'),
     h('h3', {}, 'Comptes utilisateurs (identity-manager)'),
     table(userColumns, im, 'Aucun type configuré.'),
@@ -813,7 +813,7 @@ async function typesView() {
 
 const VIEWS = [
   { id: 'products', label: 'Produits', render: productsView },
-  { id: 'service-accounts', label: 'Comptes de service', render: accountsView(serviceAccounts) },
+  { id: 'service-accounts', label: 'Comptes applicatifs', render: accountsView(serviceAccounts) },
   { id: 'identities', label: 'Identités', render: identitiesView },
   { id: 'user-accounts', label: 'Comptes utilisateurs', render: accountsView(userAccounts) },
   { id: 'types', label: 'Types', render: typesView },

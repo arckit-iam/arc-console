@@ -5,7 +5,7 @@ Console web de la plateforme [Instant Access Provider](https://github.com/arckit
 Elle permet de gérer :
 
 - les **produits** et leurs **profils** (groupes) via [product-manager](https://github.com/arckit-iam/product-manager) ;
-- les **comptes de service** (non utilisateurs), rattachés à un produit ;
+- les **comptes applicatifs** (non utilisateurs), rattachés à un produit ;
 - les **identités** humaines via [identity-manager](https://github.com/arckit-iam/identity-manager) ;
 - les **comptes utilisateurs**, rattachés à une identité ;
 - la consultation des **types de compte** (définis par la configuration du déploiement).
